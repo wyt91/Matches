@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <!-- 适配移动设备 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>老千的火柴</title>
+  <style>
+    body {
+      background-color: black;
+      color: orange;
+      font-family: sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+    }
+    h1, h2, p {
+      margin: 10px;
+    }
+    input, button {
+      font-size: 24px;
+      padding: 10px;
+      margin: 5px;
+    }
+    #betButtons button {
+      width: 100px;
+    }
+    .match {
+      font-size: 50px;
+      cursor: pointer;
+      display: inline-block;
+      margin: 5px;
+      user-select: none;
+    }
+    #gameButtons button {
+      font-size: 24px;
+      margin: 10px;
+      padding: 10px 15px;
+    }
+    .row {
+      margin: 15px 0;
+    }
+    /* 结果页中贷款/结束选项 */
+    #loanOptions button {
+      font-size: 24px;
+      padding: 10px 15px;
+      margin: 5px;
+    }
+  </style>
+</head>
+<body>
+  <!-- 下注页面（含名字输入） -->
+  <div id="betPage">
+    <h1>老千的火柴</h1>
+    <div id="nameSection">
+      <input type="text" id="playerName" placeholder="请输入名字">
+      <button id="startGame">开始</button>
+    </div>
+    <div id="betSection" style="display:none;">
+      <h2 id="creditDisplay">筹码: 100</h2>
+      <p>请选择赌注：</p>
+      <div id="betButtons"></div>
+    </div>
+  </div>
+
+  <!-- 游戏页面 -->
+  <div id="gamePage" style="display:none;">
+    <h1>老千的火柴</h1>
+    <h2 id="gameCredit"></h2>
+    <div id="gameBoard">
+      <div class="row" data-row="0"></div>
+      <div class="row" data-row="1"></div>
+      <div class="row" data-row="2"></div>
+    </div>
+    <div id="gameButtons">
+      <button id="undoButton">撤回</button>
+      <button id="endTurnButton">结束回合</button>
+      <button id="surrenderButton">投降</button>
+    </div>
+  </div>
+
+  <!-- 结果页面 -->
+  <div id="resultPage" style="display:none;">
+    <h2 id="resultMessage"></h2>
+    <!-- 正常继续按钮 -->
+    <button id="continueButton">继续</button>
+    <!-- 当筹码为0时显示贷款/结束选项 -->
+    <div id="loanOptions" style="display:none;">
+      <button id="loanButton">贷款</button>
+      <button id="endGameButton">结束游戏</button>
+    </div>
+  </div>
+
+  <script>
+    // 全局变量
+    var playerName = "";
+    var credit = 100;
+    var borrowed = false; // 是否已贷款
+    var currentBet = 0;
+    // 游戏局面：三行火柴，初始分别为 3, 5, 7
+    var gameState = [3, 5, 7];
+    // 记录本回合玩家点击的操作（用于撤回），每项 {row: 行号}
+    var currentTurnMoves = [];
+    // 本回合只能在同一行操作，null 表示尚未确定
+    var selectedRow = null;
+    // AI 的必胜局面目标（排序后的数字字符串，顺序无关，如"123"可代表任意顺序的1,2,3）
+    var winningConfigs = ["001", "111", "022", "033", "044", "055", "123", "145", "246"];
+
+    // 更新下注页面显示筹码
+    function updateBetPage() {
+      document.getElementById("creditDisplay").innerText = "筹码: " + credit;
+    }
+
+    // 显示指定页面，隐藏其他页面
+    function showPage(pageId) {
+      document.getElementById("betPage").style.display = "none";
+      document.getElementById("gamePage").style.display = "none";
+      document.getElementById("resultPage").style.display = "none";
+      document.getElementById(pageId).style.display = "block";
+    }
+
+    // 初始化游戏局面及相关变量
+    function initializeGameState() {
+      gameState = [3, 5, 7];
+      selectedRow = null;
+      currentTurnMoves = [];
+      renderGameBoard();
+    }
+
+    // 渲染游戏板，根据 gameState 更新每行火柴
+    function renderGameBoard() {
+      var rows = document.getElementsByClassName("row");
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        row.innerHTML = "";
+        for (var j = 0; j < gameState[i]; j++) {
+          var span = document.createElement("span");
+          span.innerText = "🔥";
+          span.className = "match";
+          span.dataset.row = i;
+          span.addEventListener("click", function() {
+            var rowIndex = this.dataset.row;
+            // 本回合只能在同一排操作
+            if (selectedRow === null || selectedRow == rowIndex) {
+              selectedRow = rowIndex;
+              // 点击后直接移除此火柴
+              this.remove();
+              currentTurnMoves.push({row: parseInt(rowIndex)});
+              // 更新局面
+              gameState[rowIndex]--;
+            } else {
+              alert("本回合只能在同一排消除，若要换行请撤回操作");
+            }
+          });
+          row.appendChild(span);
+        }
+      }
+      document.getElementById("gameCredit").innerText = "筹码: " + credit + "   赌注: " + currentBet;
+    }
+
+    // 撤回上一次操作
+    function undoMove() {
+      if (currentTurnMoves.length > 0) {
+        var lastMove = currentTurnMoves.pop();
+        gameState[lastMove.row]++;
+        selectedRow = currentTurnMoves.length > 0 ? currentTurnMoves[0].row : null;
+        renderGameBoard();
+      }
+    }
+
+    // 结束玩家回合（必须至少消除一个火柴）
+    function endPlayerTurn() {
+      if (currentTurnMoves.length === 0) {
+        alert("请至少移除一个火柴再结束回合");
+        return;
+      }
+      // 若玩家拿走最后一根火柴，则判输
+      if (gameState[0] + gameState[1] + gameState[2] === 0) {
+        roundEnd(false);
+        return;
+      }
+      // 重置本回合记录，进入 AI 回合
+      currentTurnMoves = [];
+      selectedRow = null;
+      setTimeout(function() { aiTurn(); }, 500);
+    }
+
+    // AI 回合：尝试执行必胜策略（局面排序后匹配目标组合），否则移除一根火柴
+    function aiTurn() {
+      var bestMove = null;
+      for (var row = 0; row < 3; row++) {
+        if (gameState[row] > 0) {
+          for (var remove = 1; remove <= gameState[row]; remove++) {
+            var newState = gameState.slice();
+            newState[row] -= remove;
+            // 对局面排序后构造字符串（顺序无关）
+            var sortedState = newState.slice().sort(function(a, b){ return a - b; }).join("");
+            if (winningConfigs.indexOf(sortedState) !== -1) {
+              bestMove = {row: row, remove: remove};
+              break;
+            }
+          }
+          if (bestMove) break;
+        }
+      }
+      // 如果没有必胜走法，则从第一行非空行移除一根
+      if (!bestMove) {
+        for (var row = 0; row < 3; row++) {
+          if (gameState[row] > 0) {
+            bestMove = {row: row, remove: 1};
+            break;
+          }
+        }
+      }
+      if (bestMove) {
+        gameState[bestMove.row] -= bestMove.remove;
+        alert("AI 在第 " + (parseInt(bestMove.row) + 1) + " 排移除了 " + bestMove.remove + " 根火柴");
+        renderGameBoard();
+      }
+      // 若局面空，则 AI 拿走最后一根，判定 AI 输，玩家获胜
+      if (gameState[0] + gameState[1] + gameState[2] === 0) {
+        roundEnd(true);
+      }
+    }
+
+    // 回合结束，playerWin 为 true 表示玩家赢，false 表示玩家输
+    function roundEnd(playerWin) {
+      if (playerWin) {
+        alert("你赢了这一局！");
+        credit += currentBet;
+        document.getElementById("resultMessage").innerText = "你赢了！";
+      } else {
+        alert("你输了这一局！");
+        credit -= currentBet;
+        document.getElementById("resultMessage").innerText = "你输了！";
+      }
+      
+      // 检查筹码情况：
+      // 如果筹码不足（<= 0），显示贷款/结束游戏选项
+      if (credit <= 0) {
+        document.getElementById("continueButton").style.display = "none";
+        document.getElementById("loanOptions").style.display = "block";
+        // 如果已经贷款，则不能再贷款
+        if (borrowed) {
+          document.getElementById("loanButton").style.display = "none";
+        } else {
+          document.getElementById("loanButton").style.display = "inline-block";
+        }
+      } else {
+        // 正常显示“继续”按钮
+        document.getElementById("continueButton").style.display = "inline-block";
+        document.getElementById("loanOptions").style.display = "none";
+      }
+      showPage("resultPage");
+    }
+
+    // 绑定各页面按钮事件
+    document.getElementById("startGame").addEventListener("click", function() {
+      var nameInput = document.getElementById("playerName").value;
+      if (nameInput.trim() === "") {
+        alert("请输入名字");
+        return;
+      }
+      playerName = nameInput;
+      document.getElementById("betSection").style.display = "block";
+      updateBetPage();
+    });
+
+    // 生成下注按钮
+    var betAmounts = [10, 20, 50, 100, 200, 500, 1000];
+    var betButtonsDiv = document.getElementById("betButtons");
+    betAmounts.forEach(function(amount) {
+      var btn = document.createElement("button");
+      btn.innerText = amount;
+      btn.addEventListener("click", function() {
+        currentBet = amount;
+        initializeGameState();
+        showPage("gamePage");
+      });
+      betButtonsDiv.appendChild(btn);
+    });
+
+    document.getElementById("undoButton").addEventListener("click", function() {
+      undoMove();
+    });
+
+    document.getElementById("endTurnButton").addEventListener("click", function() {
+      endPlayerTurn();
+    });
+
+    document.getElementById("surrenderButton").addEventListener("click", function() {
+      roundEnd(false);
+    });
+
+    // “继续”按钮：筹码足够时，回到下注页面（保留当前筹码）
+    document.getElementById("continueButton").addEventListener("click", function() {
+      showPage("betPage");
+      updateBetPage();
+    });
+
+    // “贷款”按钮：如果选择贷款，则将筹码设为 100，并标记已贷款，然后回到下注页面
+    document.getElementById("loanButton").addEventListener("click", function() {
+      borrowed = true;
+      credit = 100;
+      alert("已贷款 100 筹码");
+      showPage("betPage");
+      updateBetPage();
+    });
+
+    // “结束游戏”按钮：结束当前游戏，回到最初的名字输入页面，重置所有数据
+    document.getElementById("endGameButton").addEventListener("click", function() {
+      // 重置状态
+      playerName = "";
+      credit = 100;
+      borrowed = false;
+      currentBet = 0;
+      document.getElementById("playerName").value = "";
+      document.getElementById("betSection").style.display = "none";
+      showPage("betPage");
+      updateBetPage();
+    });
+  </script>
+</body>
+</html>
